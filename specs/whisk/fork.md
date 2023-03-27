@@ -33,20 +33,13 @@ The upgrade occurs after the completion of the inner loop of `process_slots` tha
 This ensures that we drop right into the beginning of the shuffling phase but without `process_whisk_epoch()` triggering for this Whisk run. Hence we handle all the setup ourselves in `upgrade_to_whisk()` below.
 
 ```python
-def whisk_get_initial_commitments(validator_index: ValidatorIndex):
-    # TODO
-    pass
-
-def whisk_candidate_selection(state: BeaconState, epoch: Epoch):
-    # TODO
-    pass
-
-def whisk_proposer_selection(state: BeaconState, epoch: Epoch):
-    # TODO
-    pass
-
 def upgrade_to_whisk(pre: bellatrix.BeaconState) -> BeaconState:
     epoch = bellatrix.get_current_epoch(pre)
+
+    n = len(state.validators)
+    whisk_k_commitments = [get_k_commitment(get_unique_whisk_k(pre, i)) for i in range(n)]
+    whisk_trackers = [get_initial_tracker(get_unique_whisk_k(pre, i)) for i in range(n)]
+
     post = BeaconState(
         # Versioning
         genesis_time=pre.genesis_time,
@@ -67,7 +60,7 @@ def upgrade_to_whisk(pre: bellatrix.BeaconState) -> BeaconState:
         eth1_data_votes=pre.eth1_data_votes,
         eth1_deposit_index=pre.eth1_deposit_index,
         # Registry
-        validators=[],
+        validators=pre.validators,
         balances=pre.balances,
         # Randomness
         randao_mixes=pre.randao_mixes,
@@ -83,31 +76,18 @@ def upgrade_to_whisk(pre: bellatrix.BeaconState) -> BeaconState:
         finalized_checkpoint=pre.finalized_checkpoint,
         # Inactivity
         inactivity_scores=pre.inactivity_Scores,
+        # Whisk
+        whisk_candidate_trackers=[None] * WHISK_CANDIDATE_TRACKERS_COUNT, # [New in Whisk]
+        whisk_proposer_trackers=[None] * WHISK_PROPOSER_TRACKERS_COUNT, # [New in Whisk]
+        whisk_trackers=whisk_trackers, # [New in Whisk]
+        whisk_k_commitments=whisk_k_commitments, # [New in Whisk]
     )
-
-    # Initialize all validators with predictable commitments
-    for val_index, pre_validator in enumerate(pre.validators):
-        whisk_commitment, whisk_tracker = whisk_get_initial_commitments(val_index)
-
-        post_validator = Validator(
-            pubkey=pre_validator.pubkey,
-            withdrawal_credentials=pre_validator.withdrawal_credentials,
-            effective_balance=pre_validator.effective_balance,
-            slashed=pre_validator.slashed,
-            activation_eligibility_epoch=pre_validator.activation_eligibility_epoch,
-            activation_epoch=pre_validator.activation_epoch,
-            exit_epoch=pre_validator.exit_epoch,
-            withdrawable_epoch=pre_validator.withdrawable_epoch,
-            whisk_commitment=whisk_commitment,
-            whisk_tracker=whisk_tracker,
-        )
-        post.validators.append(post_validator)
 
     # Do a candidate selection followed by a proposer selection so that we have proposers for the upcoming day
     # Use an old epoch when selecting candidates so that we don't get the same seed as in the next candidate selection
-    whisk_candidate_selection(post, epoch - WHISK_PROPOSER_SELECTION_GAP - 1)
-    whisk_proposer_selection(post, epoch)
+    select_whisk_candidate_trackers(post, epoch - WHISK_PROPOSER_SELECTION_GAP - 1)
+    select_whisk_proposer_trackers(post, epoch)
 
     # Do a final round of candidate selection. We need it so that we have something to shuffle over the upcoming shuffling phase
-    whisk_candidate_selection(post, epoch)
+    select_whisk_candidate_trackers(post, epoch)
 ```
